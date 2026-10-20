@@ -34,7 +34,7 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
 
 #chip{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);
   background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  padding:7px 14px;border-radius:999px;font-size:13px;letter-spacing:.02em;white-space:nowrap;
+  padding:7px 14px;border-radius:18px;font-size:13px;letter-spacing:.02em;max-width:calc(100% - 32px);width:max-content;text-align:center;
   display:flex;align-items:center;gap:8px;transition:opacity .25s;pointer-events:none}
 #chip.off{opacity:0}
 #meter{width:46px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
@@ -70,6 +70,7 @@ body.hide #show{display:grid}
 #start h1{margin:0 0 8px;font-weight:600;font-size:26px;letter-spacing:.01em;text-wrap:balance}
 #start p{margin:0 auto 22px;max-width:30ch;color:var(--muted)}
 #start button{background:var(--accent);color:#0b1a20;border:0;border-radius:999px;padding:13px 30px;font-weight:600;font-size:16px;cursor:pointer}
+#ver{margin-top:22px;font-size:12px;color:var(--muted);opacity:.7}
 #err{color:#ffb4a8;margin-top:18px;max-width:34ch;margin-inline:auto}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
@@ -112,6 +113,7 @@ body.hide #show{display:grid}
     <p>Front camera mirror with zoom, brightness, a ring light, freeze frame and breath fog.</p>
     <button id="go">Open mirror</button>
     <div id="err" role="alert"></div>
+    <div id="ver">version 3</div>
   </div>
 </div>
 
@@ -159,6 +161,13 @@ $('#go').onclick = async () => {
   video.srcObject = stream;
   video.play().catch(() => { needsTap = true; chip('Tap the screen to start the camera', 0); });
   try { applyAll(); resize(); } catch (e) { console.error(e); }
+  // Watchdog: report a camera that was granted but never delivers a picture
+  setTimeout(() => {
+    if (video.videoWidth) return;
+    const t = stream.getVideoTracks()[0];
+    chip(`No picture from camera · track ${t ? t.readyState : 'missing'}${t && t.muted ? ', muted' : ''} · video ${video.readyState}, ${video.paused ? 'paused' : 'playing'} · tap to retry`, 0);
+    needsTap = true;
+  }, 4000);
   keepAwake();
   requestAnimationFrame(loop);
 };
