@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0d0f12">
+<title>Pocket Mirror</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* Layout: full-bleed camera stage, optional white "ring light" frame around it, floating glass control bar at the bottom */
+:root{
+  --bg:#0d0f12; --fg:#eef1f4; --muted:#a3acb6;
+  --glass:rgba(18,22,27,.66); --line:rgba(255,255,255,.14);
+  --accent:#9fd3e6; --ring:#fff7ec;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit}
+
+#stage{position:fixed;inset:0;background:#000;overflow:hidden}
+#light{position:absolute;inset:0;background:var(--ring);opacity:0;transition:opacity .3s}
+#view{position:absolute;inset:0;overflow:hidden;touch-action:none;transition:inset .3s,border-radius .3s}
+body.light-1 #light,body.light-2 #light{opacity:1}
+body.light-1 #view{inset:calc(18px + env(safe-area-inset-top)) 18px calc(18px + env(safe-area-inset-bottom));border-radius:28px}
+body.light-2 #view{inset:calc(54px + env(safe-area-inset-top)) 38px calc(54px + env(safe-area-inset-bottom));border-radius:44px}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  transform:scaleX(-1) scale(var(--z,1));filter:brightness(var(--b,1))}
+#fog{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+
+#chip{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);
+  background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:7px 14px;border-radius:999px;font-size:13px;letter-spacing:.02em;white-space:nowrap;
+  display:flex;align-items:center;gap:8px;transition:opacity .25s;pointer-events:none}
+#chip.off{opacity:0}
+#meter{width:46px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+#meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .08s}
+
+#bar{position:absolute;left:0;right:0;bottom:0;
+  padding:28px max(16px,env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));
+  background:linear-gradient(transparent,rgba(0,0,0,.6));display:grid;gap:14px;transition:transform .3s,opacity .3s}
+body.hide #bar{transform:translateY(100%);opacity:0;pointer-events:none}
+.sl{display:grid;grid-template-columns:28px 1fr 44px;align-items:center;gap:10px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sl svg{width:20px;height:20px;justify-self:center}
+input[type=range]{width:100%;accent-color:var(--accent);height:28px}
+.btns{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.btns button{background:var(--glass);border:1px solid var(--line);border-radius:16px;padding:9px 2px 7px;
+  display:grid;justify-items:center;gap:3px;font-size:11.5px;letter-spacing:.02em;cursor:pointer;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.btns button svg{width:22px;height:22px}
+.btns button[aria-pressed=true]{background:var(--accent);color:#0b1a20;border-color:transparent}
+.btns button:focus-visible,#show:focus-visible,#start button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#show{position:absolute;right:max(14px,env(safe-area-inset-right));bottom:calc(14px + env(safe-area-inset-bottom));
+  width:44px;height:44px;border-radius:50%;background:var(--glass);border:1px solid var(--line);display:none;
+  place-items:center;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+body.hide #show{display:grid}
+#show svg{width:22px;height:22px}
+
+#start{position:fixed;inset:0;display:grid;place-items:center;text-align:center;
+  padding:24px max(24px,env(safe-area-inset-right)) 24px max(24px,env(safe-area-inset-left));
+  background:radial-gradient(120% 80% at 50% 30%,#1c2630,var(--bg))}
+#start .oval{width:150px;height:200px;margin:0 auto 26px;border-radius:50%;
+  background:linear-gradient(160deg,#cfe8f1 0%,#7fb3c6 45%,#2b4654 100%);
+  box-shadow:0 0 0 7px #2a333c,0 0 0 9px #46525e,0 20px 60px rgba(0,0,0,.5);position:relative;overflow:hidden}
+#start .oval::after{content:"";position:absolute;left:26%;top:-10%;width:22%;height:120%;background:rgba(255,255,255,.35);transform:rotate(28deg);filter:blur(3px)}
+#start h1{margin:0 0 8px;font-weight:600;font-size:26px;letter-spacing:.01em;text-wrap:balance}
+#start p{margin:0 auto 22px;max-width:30ch;color:var(--muted)}
+#start button{background:var(--accent);color:#0b1a20;border:0;border-radius:999px;padding:13px 30px;font-weight:600;font-size:16px;cursor:pointer}
+#err{color:#ffb4a8;margin-top:18px;max-width:34ch;margin-inline:auto}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="stage" hidden>
+  <div id="light"></div>
+  <div id="view">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="fog"></canvas>
+  </div>
+  <div id="chip" class="off"><span id="chipText"></span><span id="meter" hidden><i></i></span></div>
+
+  <div id="bar">
+    <label class="sl" for="zoom">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M11 8v6M8 11h6"/></svg>
+      <input id="zoom" type="range" min="1" max="4" step="0.01" value="1" aria-label="Zoom">
+      <span id="zoomV">1.0×</span>
+    </label>
+    <label class="sl" for="bright">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <input id="bright" type="range" min="0.6" max="1.8" step="0.01" value="1" aria-label="Brightness">
+      <span id="brightV">100%</span>
+    </label>
+    <div class="btns">
+      <button id="bLight" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><rect x="7.5" y="7.5" width="9" height="9" rx="2"/></svg><span id="lightLbl">Light</span></button>
+      <button id="bFog" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9h12a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3M3 12h9"/></svg><span>Fog</span></button>
+      <button id="bFreeze" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><span>Freeze</span></button>
+      <button id="bSave" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span>Save</span></button>
+      <button id="bHide" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg><span>Hide</span></button>
+    </div>
+  </div>
+  <button id="show" aria-label="Show controls"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 15 6-6 6 6"/></svg></button>
+</div>
+
+<div id="start">
+  <div>
+    <div class="oval" aria-hidden="true"></div>
+    <h1>Pocket Mirror</h1>
+    <p>Front camera mirror with zoom, brightness, a ring light, freeze frame and breath fog.</p>
+    <button id="go">Open mirror</button>
+    <div id="err" role="alert"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const video = $('#video'), view = $('#view'), fogC = $('#fog'), fctx = fogC.getContext('2d');
+const mask = document.createElement('canvas'), mctx = mask.getContext('2d');
+const probe = document.createElement('canvas'); probe.width = probe.height = 8;
+const pctx = probe.getContext('2d', { willReadFrequently: true });
+const FS = 0.5;                       // fog canvas resolution relative to CSS pixels
+const state = { zoom: 1, bright: 1, light: 0, frozen: false, listening: false, fogPresent: false, blowing: false };
+
+/* ---------- settings memory ---------- */
+try { Object.assign(state, JSON.parse(localStorage.getItem('pm') || '{}'), { frozen: false, listening: false }); } catch {}
+const saveSettings = () => { try { localStorage.setItem('pm', JSON.stringify({ zoom: state.zoom, bright: state.bright, light: state.light })); } catch {} };
+
+/* ---------- start ---------- */
+$('#go').onclick = async () => {
+  const err = $('#err'); err.textContent = '';
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    err.textContent = 'The camera only works when this page is opened over https:// (or localhost). Host it on an https site and open that link.';
+    return;
+  }
+  // Try the front camera first, then fall back to "any camera" with no constraints
+  const attempts = [
+    { video: { facingMode: 'user' }, audio: false },
+    { video: true, audio: false }
+  ];
+  let stream, lastErr;
+  for (const c of attempts) {
+    try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+    catch (e) { lastErr = e; if (e.name === 'NotAllowedError' || e.name === 'SecurityError') break; }
+  }
+  if (!stream) {
+    const e = lastErr || {};
+    err.textContent = e.name === 'NotAllowedError'
+      ? 'Camera access was blocked. Allow the camera for this site in your browser settings, then try again.'
+      : e.name === 'NotFoundError' ? 'No camera was found on this device.'
+      : e.name === 'NotReadableError' ? 'The camera is busy. Close other apps or tabs using it (video calls, camera app), then try again.'
+      : `Could not start the camera (${e.name || 'Error'}: ${e.message || 'unknown'}).`;
+    return;
+  }
+  // Show the mirror before playing: some browsers stall a video that sits in a hidden container
+  $('#start').hidden = true; $('#stage').hidden = false;
+  video.srcObject = stream;
+  video.play().catch(() => { needsTap = true; chip('Tap the screen to start the camera', 0); });
+  try { applyAll(); resize(); } catch (e) { console.error(e); }
+  keepAwake();
+  requestAnimationFrame(loop);
+};
+
+/* ---------- zoom / brightness / light ---------- */
+const zoomEl = $('#zoom'), brightEl = $('#bright');
+function setZoom(z) {
+  state.zoom = Math.min(4, Math.max(1, z));
+  zoomEl.value = state.zoom; $('#zoomV').textContent = state.zoom.toFixed(1) + '×';
+  view.style.setProperty('--z', state.zoom); saveSettings();
+}
+function setBright(b) {
+  state.bright = b; brightEl.value = b; $('#brightV').textContent = Math.round(b * 100) + '%';
+  view.style.setProperty('--b', b); saveSettings();
+}
+function setLight(l) {
+  state.light = l; document.body.classList.remove('light-1', 'light-2');
+  if (l) document.body.classList.add('light-' + l);
+  $('#bLight').setAttribute('aria-pressed', l > 0);
+  $('#lightLbl').textContent = ['Light', 'Soft', 'Bright'][l]; saveSettings();
+  setTimeout(resize, 320);
+}
+function applyAll() { setZoom(state.zoom); setBright(state.bright); setLight(state.light); }
+zoomEl.oninput = () => setZoom(+zoomEl.value);
+brightEl.oninput = () => setBright(+brightEl.value);
+$('#bLight').onclick = () => setLight((state.light + 1) % 3);
+
+/* ---------- freeze & hide ---------- */
+function setFrozen(f) {
+  state.frozen = f; f ? video.pause() : video.play();
+  $('#bFreeze').setAttribute('aria-pressed', f);
+  f ? chip('Frozen · tap to resume', 0) : chip('', -1);
+}
+$('#bFreeze').onclick = () => setFrozen(!state.frozen);
+$('#bHide').onclick = () => document.body.classList.add('hide');
+$('#show').onclick = () => document.body.classList.remove('hide');
+
+/* ---------- status chip ---------- */
+let chipTimer;
+function chip(text, ms = 2200) {
+  clearTimeout(chipTimer);
+  const c = $('#chip');
+  if (ms < 0 || !text) { if (state.frozen) return chip('Frozen · tap to resume', 0); if (state.listening) return chip('Blow on the phone to fog it', 0, true); c.classList.add('off'); return; }
+  $('#chipText').textContent = text; c.classList.remove('off');
+  $('#meter').hidden = !state.listening || state.frozen;
+  if (ms > 0) chipTimer = setTimeout(() => chip('', -1), ms);
+}
+
+/* ---------- sizing ---------- */
+function resize() {
+  const r = view.getBoundingClientRect();
+  const w = Math.max(1, Math.round(r.width * FS)), h = Math.max(1, Math.round(r.height * FS));
+  if (mask.width === w && mask.height === h) return;
+  const old = document.createElement('canvas'); old.width = mask.width; old.height = mask.height;
+  if (mask.width) old.getContext('2d').drawImage(mask, 0, 0);
+  mask.width = fogC.width = w; mask.height = fogC.height = h;
+  if (old.width) mctx.drawImage(old, 0, 0, w, h);
+}
+new ResizeObserver(resize).observe(view);
+
+/* Draw the camera frame mirrored, cropped like object-fit:cover, zoomed about the center */
+function drawVideo(ctx, W, H, z) {
+  const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return;
+  const s = Math.max(W / vw, H / vh) * z, dw = vw * s, dh = vh * s;
+  ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1);
+  ctx.drawImage(video, (W - dw) / 2, (H - dh) / 2, dw, dh); ctx.restore();
+}
+
+/* ---------- fog ---------- */
+const FOG_RGB = '228,235,240';
+function addFog(a) {
+  const W = mask.width, H = mask.height;
+  mctx.globalCompositeOperation = 'source-over';
+  const g = mctx.createRadialGradient(W / 2, H * .55, 0, W / 2, H * .55, Math.max(W, H) * .8);
+  g.addColorStop(0, `rgba(${FOG_RGB},${a})`);
+  g.addColorStop(.55, `rgba(${FOG_RGB},${a * .85})`);
+  g.addColorStop(1, `rgba(${FOG_RGB},${a * .35})`);
+  mctx.fillStyle = g; mctx.fillRect(0, 0, W, H);
+  state.fogPresent = true;
+}
+function wipe(x0, y0, x1, y1) {
+  if (!state.fogPresent) return;
+  mctx.save();
+  mctx.globalCompositeOperation = 'destination-out';
+  mctx.filter = 'blur(3px)';
+  mctx.lineCap = mctx.lineJoin = 'round'; mctx.lineWidth = 64 * FS; mctx.strokeStyle = '#000';
+  mctx.beginPath(); mctx.moveTo(x0 * FS, y0 * FS); mctx.lineTo(x1 * FS, y1 * FS); mctx.stroke();
+  mctx.restore();
+}
+function evaporate() {
+  if (state.blowing || !state.fogPresent) return;
+  mctx.globalCompositeOperation = 'destination-out';
+  mctx.fillStyle = 'rgba(0,0,0,.03)'; mctx.fillRect(0, 0, mask.width, mask.height);
+  mctx.globalCompositeOperation = 'source-over';
+  pctx.clearRect(0, 0, 8, 8); pctx.drawImage(mask, 0, 0, 8, 8);
+  const d = pctx.getImageData(0, 0, 8, 8).data; let sum = 0;
+  for (let i = 3; i < d.length; i += 4) sum += d[i];
+  if (sum < 64 * 6) { mctx.clearRect(0, 0, mask.width, mask.height); state.fogPresent = false; fctx.clearRect(0, 0, fogC.width, fogC.height); }
+}
+setInterval(evaporate, 400);
+function renderFog() {
+  const W = fogC.width, H = fogC.height;
+  fctx.globalCompositeOperation = 'source-over'; fctx.clearRect(0, 0, W, H);
+  fctx.filter = `blur(${7}px) brightness(${state.bright * 1.08})`;
+  drawVideo(fctx, W, H, state.zoom);                 // blurred copy of the image...
+  fctx.filter = 'none';
+  fctx.globalCompositeOperation = 'destination-in';  // ...only where the glass is fogged
+  fctx.drawImage(mask, 0, 0);
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.globalAlpha = .5; fctx.drawImage(mask, 0, 0); fctx.globalAlpha = 1;  // milky tint
+}
+
+/* ---------- breath detection (microphone) ---------- */
+let analyser, td, fd, binHz, blowMs = 0;
+async function startListening() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = ac.createAnalyser(); analyser.fftSize = 1024;
+    ac.createMediaStreamSource(s).connect(analyser);
+    td = new Float32Array(analyser.fftSize); fd = new Uint8Array(analyser.frequencyBinCount);
+    binHz = ac.sampleRate / analyser.fftSize;
+    window._micStream = s; window._ac = ac;
+    return true;
+  } catch { return false; }
+}
+function stopListening() {
+  window._micStream?.getTracks().forEach(t => t.stop()); window._ac?.close();
+  analyser = null; state.blowing = false;
+}
+$('#bFog').onclick = async () => {
+  if (state.listening) {
+    state.listening = false; stopListening();
+    $('#bFog').setAttribute('aria-pressed', false); chip('Fog off', 1400); return;
+  }
+  const ok = await startListening();
+  if (ok) {
+    state.listening = true; $('#bFog').setAttribute('aria-pressed', true);
+    chip('Blow on the phone to fog it', 0);
+  } else {
+    addFog(.75); chip('Microphone blocked, so the glass was fogged for you. Wipe it with a finger.', 3500);
+  }
+};
+function detectBlow(dt) {
+  analyser.getFloatTimeDomainData(td);
+  let rms = 0; for (const v of td) rms += v * v; rms = Math.sqrt(rms / td.length);
+  analyser.getByteFrequencyData(fd);
+  let low = 0, total = 1; const cut = 500 / binHz;
+  for (let i = 1; i < fd.length; i++) { total += fd[i]; if (i < cut) low += fd[i]; }
+  const ratio = low / total;
+  $('#meter i').style.width = Math.min(100, rms * 400) + '%';
+  const loud = rms > 0.09 && ratio > 0.3;           // breath = loud, rumbly, low-frequency noise
+  blowMs = loud ? blowMs + dt : Math.max(0, blowMs - dt * 2);
+  state.blowing = blowMs > 120;
+  if (state.blowing) addFog(Math.min(.06, (rms - .05) * .5) * dt / 16);
+}
+
+/* ---------- touch: tap = freeze, pinch = zoom, drag = wipe fog ---------- */
+const pts = new Map(); let pinch = null, tap = null, last = null, needsTap = false;
+const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+view.addEventListener('pointerdown', e => {
+  if (needsTap) { needsTap = false; video.play().then(() => chip('', -1)).catch(() => {}); return; }
+  view.setPointerCapture(e.pointerId);
+  const r = view.getBoundingClientRect(), p = { x: e.clientX - r.left, y: e.clientY - r.top };
+  pts.set(e.pointerId, p);
+  if (pts.size === 1) { tap = { ...p, t: performance.now(), moved: false }; last = p; wipe(p.x, p.y, p.x + .1, p.y); }
+  if (pts.size === 2) { tap = null; pinch = { d: dist(), z: state.zoom }; }
+});
+view.addEventListener('pointermove', e => {
+  if (!pts.has(e.pointerId)) return;
+  const r = view.getBoundingClientRect(), p = { x: e.clientX - r.left, y: e.clientY - r.top };
+  pts.set(e.pointerId, p);
+  if (pinch && pts.size >= 2) { setZoom(pinch.z * dist() / pinch.d); return; }
+  if (pts.size === 1 && last) {
+    if (tap && Math.hypot(p.x - tap.x, p.y - tap.y) > 10) tap.moved = true;
+    wipe(last.x, last.y, p.x, p.y); last = p;
+  }
+});
+const up = e => {
+  pts.delete(e.pointerId);
+  if (pts.size < 2) pinch = null;
+  if (pts.size === 0) {
+    if (tap && !tap.moved && performance.now() - tap.t < 350 && !state.fogPresent) setFrozen(!state.frozen);
+    tap = null; last = null;
+  }
+};
+view.addEventListener('pointerup', up); view.addEventListener('pointercancel', up);
+
+/* ---------- snapshot ---------- */
+$('#bSave').onclick = async () => {
+  const r = view.getBoundingClientRect(), k = Math.min(devicePixelRatio || 1, 1600 / Math.max(r.width, r.height));
+  const c = document.createElement('canvas'); c.width = Math.round(r.width * k); c.height = Math.round(r.height * k);
+  const x = c.getContext('2d');
+  x.filter = `brightness(${state.bright})`; drawVideo(x, c.width, c.height, state.zoom); x.filter = 'none';
+  if (state.fogPresent) x.drawImage(fogC, 0, 0, c.width, c.height);
+  const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', .92));
+  const name = 'mirror-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.jpg';
+  const file = new File([blob], name, { type: 'image/jpeg' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  chip('Photo saved', 1600);
+};
+
+/* ---------- keep screen on ---------- */
+let lock;
+async function keepAwake() { try { lock = await navigator.wakeLock?.request('screen'); } catch {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !$('#stage').hidden) keepAwake(); });
+
+/* ---------- main loop ---------- */
+let prev = performance.now();
+function loop(t) {
+  const dt = Math.min(50, t - prev); prev = t;
+  if (state.listening && analyser && !state.frozen) detectBlow(dt);
+  if (state.fogPresent) renderFog();
+  requestAnimationFrame(loop);
+}
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
