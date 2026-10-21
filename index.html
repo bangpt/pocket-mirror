@@ -21,6 +21,7 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
   font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
 button{font:inherit;color:inherit}
+[hidden]{display:none!important}
 
 #stage{position:fixed;inset:0;background:#000;overflow:hidden}
 #light{position:absolute;inset:0;background:var(--ring);opacity:0;transition:opacity .3s}
@@ -32,9 +33,9 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
   transform:scaleX(-1) scale(var(--z,1));filter:brightness(var(--b,1))}
 #fog{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 
-#chip{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);
+#chip{position:absolute;left:16px;right:16px;margin-inline:auto;top:calc(14px + env(safe-area-inset-top));
   background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  padding:7px 14px;border-radius:18px;font-size:13px;letter-spacing:.02em;max-width:calc(100% - 32px);width:max-content;text-align:center;
+  padding:7px 14px;border-radius:18px;font-size:13px;letter-spacing:.02em;width:fit-content;text-align:center;
   display:flex;align-items:center;gap:8px;transition:opacity .25s;pointer-events:none}
 #chip.off{opacity:0}
 #meter{width:46px;height:5px;border-radius:3px;background:var(--line);overflow:hidden}
@@ -113,7 +114,7 @@ body.hide #show{display:grid}
     <p>Front camera mirror with zoom, brightness, a ring light, freeze frame and breath fog.</p>
     <button id="go">Open mirror</button>
     <div id="err" role="alert"></div>
-    <div id="ver">version 3</div>
+    <div id="ver">version 5</div>
   </div>
 </div>
 
@@ -281,18 +282,23 @@ function renderFog() {
 }
 
 /* ---------- breath detection (microphone) ---------- */
-let analyser, td, fd, binHz, blowMs = 0;
+let analyser, td, fdb, binHz, blowMs = 0, floor = 0.005;
+let lastAudio = {};                                   // latest readings, for debugging
 async function startListening() {
+  // Create and resume the audio engine inside the tap, before the permission prompt,
+  // otherwise Chrome keeps it suspended and it only ever hears silence
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  ac.resume().catch(() => {});
   try {
     const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = ac.createAnalyser(); analyser.fftSize = 1024;
+    if (ac.state !== 'running') await ac.resume().catch(() => {});
+    analyser = ac.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0.3;
     ac.createMediaStreamSource(s).connect(analyser);
-    td = new Float32Array(analyser.fftSize); fd = new Uint8Array(analyser.frequencyBinCount);
+    td = new Float32Array(analyser.fftSize); fdb = new Float32Array(analyser.frequencyBinCount);
     binHz = ac.sampleRate / analyser.fftSize;
-    window._micStream = s; window._ac = ac;
+    window._micStream = s; window._ac = ac; floor = 0.005; blowMs = 0;
     return true;
-  } catch { return false; }
+  } catch { ac.close(); return false; }
 }
 function stopListening() {
   window._micStream?.getTracks().forEach(t => t.stop()); window._ac?.close();
@@ -311,18 +317,28 @@ $('#bFog').onclick = async () => {
     addFog(.75); chip('Microphone blocked, so the glass was fogged for you. Wipe it with a finger.', 3500);
   }
 };
+/* Breath on a mic = loud and noise-like (a flat spectrum, or a strong low rumble from the air hitting it).
+   Talking is loud too but tonal, with a much less flat spectrum. */
 function detectBlow(dt) {
+  if (window._ac?.state === 'suspended') window._ac.resume().catch(() => {});
   analyser.getFloatTimeDomainData(td);
   let rms = 0; for (const v of td) rms += v * v; rms = Math.sqrt(rms / td.length);
-  analyser.getByteFrequencyData(fd);
-  let low = 0, total = 1; const cut = 500 / binHz;
-  for (let i = 1; i < fd.length; i++) { total += fd[i]; if (i < cut) low += fd[i]; }
-  const ratio = low / total;
-  $('#meter i').style.width = Math.min(100, rms * 400) + '%';
-  const loud = rms > 0.09 && ratio > 0.3;           // breath = loud, rumbly, low-frequency noise
-  blowMs = loud ? blowMs + dt : Math.max(0, blowMs - dt * 2);
+  analyser.getFloatFrequencyData(fdb);                 // decibels per bin -> convert to linear power
+  let total = 1e-20, low = 0, logSum = 0, linSum = 0, n = 0;
+  for (let i = 1; i < fdb.length; i++) {
+    const f = i * binHz, pw = Math.pow(10, (isFinite(fdb[i]) ? fdb[i] : -200) / 10);
+    total += pw; if (f < 300) low += pw;
+    if (f >= 300 && f <= 4000) { logSum += Math.log(pw + 1e-20); linSum += pw; n++; }
+  }
+  const flat = n ? Math.exp(logSum / n) / (linSum / n + 1e-20) : 0, lowRatio = low / total;
+  const thr = Math.max(0.025, floor * 4);
+  const loud = rms > thr, breathy = flat > 0.15 || (lowRatio > 0.6 && flat > 0.05);
+  if (!loud) floor = floor * 0.97 + rms * 0.03;        // learn the room's background noise
+  lastAudio = { rms: +rms.toFixed(4), thr: +thr.toFixed(4), flat: +flat.toFixed(3), lowRatio: +lowRatio.toFixed(3) };
+  $('#meter i').style.width = Math.min(100, rms / thr * 50) + '%';   // half-full = threshold
+  blowMs = loud && breathy ? blowMs + dt : Math.max(0, blowMs - dt * 2);
   state.blowing = blowMs > 120;
-  if (state.blowing) addFog(Math.min(.06, (rms - .05) * .5) * dt / 16);
+  if (state.blowing) addFog(Math.min(.06, .02 + (rms - thr) * .4) * dt / 16);
 }
 
 /* ---------- touch: tap = freeze, pinch = zoom, drag = wipe fog ---------- */
