@@ -114,7 +114,7 @@ body.hide #show{display:grid}
     <p>Front camera mirror with zoom, brightness, a ring light, freeze frame and breath fog.</p>
     <button id="go">Open mirror</button>
     <div id="err" role="alert"></div>
-    <div id="ver">version 5</div>
+    <div id="ver">version 6</div>
   </div>
 </div>
 
@@ -124,7 +124,8 @@ const video = $('#video'), view = $('#view'), fogC = $('#fog'), fctx = fogC.getC
 const mask = document.createElement('canvas'), mctx = mask.getContext('2d');
 const probe = document.createElement('canvas'); probe.width = probe.height = 8;
 const pctx = probe.getContext('2d', { willReadFrequently: true });
-const FS = 0.5;                       // fog canvas resolution relative to CSS pixels
+const FS = 0.5;
+const DEBUG = /debug/.test(location.search);  // open with ?debug to see the microphone readings                       // fog canvas resolution relative to CSS pixels
 const state = { zoom: 1, bright: 1, light: 0, frozen: false, listening: false, fogPresent: false, blowing: false };
 
 /* ---------- settings memory ---------- */
@@ -332,12 +333,13 @@ function detectBlow(dt) {
   }
   const flat = n ? Math.exp(logSum / n) / (linSum / n + 1e-20) : 0, lowRatio = low / total;
   const thr = Math.max(0.025, floor * 4);
-  const loud = rms > thr, breathy = flat > 0.15 || (lowRatio > 0.6 && flat > 0.05);
+  const loud = rms > thr, breathy = flat > 0.03 || lowRatio > 0.5;   // only clearly tonal sound (a voice) is rejected
   if (!loud) floor = floor * 0.97 + rms * 0.03;        // learn the room's background noise
   lastAudio = { rms: +rms.toFixed(4), thr: +thr.toFixed(4), flat: +flat.toFixed(3), lowRatio: +lowRatio.toFixed(3) };
   $('#meter i').style.width = Math.min(100, rms / thr * 50) + '%';   // half-full = threshold
-  blowMs = loud && breathy ? blowMs + dt : Math.max(0, blowMs - dt * 2);
-  state.blowing = blowMs > 120;
+  blowMs = loud && breathy ? blowMs + dt : Math.max(0, blowMs - dt * 1.5);
+  state.blowing = blowMs > 100;
+  if (DEBUG) $('#chipText').textContent = `level ${lastAudio.rms} / need ${lastAudio.thr} · flat ${lastAudio.flat} · low ${lastAudio.lowRatio} · ${state.blowing ? 'FOG' : loud ? (breathy ? 'loud' : 'loud, tonal') : 'quiet'}`;
   if (state.blowing) addFog(Math.min(.06, .02 + (rms - thr) * .4) * dt / 16);
 }
 
@@ -398,7 +400,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 /* ---------- main loop ---------- */
 let prev = performance.now();
 function loop(t) {
-  const dt = Math.min(50, t - prev); prev = t;
+  const dt = Math.min(100, t - prev); prev = t;
   if (state.listening && analyser && !state.frozen) detectBlow(dt);
   if (state.fogPresent) renderFog();
   requestAnimationFrame(loop);
