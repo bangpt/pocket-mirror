@@ -114,7 +114,7 @@ body.hide #show{display:grid}
     <p>Front camera mirror with zoom, brightness, a ring light, freeze frame and breath fog.</p>
     <button id="go">Open mirror</button>
     <div id="err" role="alert"></div>
-    <div id="ver">version 7</div>
+    <div id="ver">version 8</div>
   </div>
 </div>
 
@@ -226,7 +226,6 @@ function resize() {
   const old = document.createElement('canvas'); old.width = mask.width; old.height = mask.height;
   if (mask.width) old.getContext('2d').drawImage(mask, 0, 0);
   mask.width = fogC.width = w; mask.height = fogC.height = h;
-  makeGrain(w, h);
   if (old.width) mctx.drawImage(old, 0, 0, w, h);
 }
 new ResizeObserver(resize).observe(view);
@@ -241,17 +240,6 @@ function drawVideo(ctx, W, H, z) {
 
 /* ---------- fog ---------- */
 const FOG_RGB = '228,235,240';
-const grain = document.createElement('canvas'), gctx = grain.getContext('2d');
-const tmp = document.createElement('canvas'), tctx = tmp.getContext('2d');
-function makeGrain(w, h) {
-  grain.width = tmp.width = w; grain.height = tmp.height = h;
-  gctx.fillStyle = 'rgb(196,204,212)'; gctx.fillRect(0, 0, w, h);      // grey haze reads on white walls
-  for (let i = 0, n = w * h / 14; i < n; i++) {                           // tiny droplets, light and dark
-    const x = Math.random() * w, y = Math.random() * h, r = Math.random() * 1.4 + .3;
-    gctx.fillStyle = Math.random() < .5 ? `rgba(255,255,255,${.35 + Math.random() * .5})` : `rgba(120,132,145,${.25 + Math.random() * .35})`;
-    gctx.beginPath(); gctx.arc(x, y, r, 0, 6.283); gctx.fill();
-  }
-}
 function addFog(a) {
   const W = mask.width, H = mask.height;
   mctx.globalCompositeOperation = 'source-over';
@@ -286,16 +274,13 @@ setInterval(evaporate, 400);
 function renderFog() {
   const W = fogC.width, H = fogC.height;
   fctx.globalCompositeOperation = 'source-over'; fctx.clearRect(0, 0, W, H);
-  fctx.filter = `blur(10px) brightness(${state.bright}) contrast(.7) saturate(.6)`;
+  fctx.filter = `blur(7px) brightness(${state.bright * 1.08})`;
   drawVideo(fctx, W, H, state.zoom);                 // blurred copy of the image...
   fctx.filter = 'none';
   fctx.globalCompositeOperation = 'destination-in';  // ...only where the glass is fogged
   fctx.drawImage(mask, 0, 0);
   fctx.globalCompositeOperation = 'source-over';
-  fctx.globalAlpha = .45; fctx.drawImage(mask, 0, 0);                        // milky tint
-  tctx.globalCompositeOperation = 'copy'; tctx.drawImage(grain, 0, 0);
-  tctx.globalCompositeOperation = 'destination-in'; tctx.drawImage(mask, 0, 0);
-  fctx.globalAlpha = .4; fctx.drawImage(tmp, 0, 0); fctx.globalAlpha = 1;   // droplet texture
+  fctx.globalAlpha = .5; fctx.drawImage(mask, 0, 0); fctx.globalAlpha = 1;  // milky tint
 }
 
 /* ---------- breath detection (microphone) ---------- */
@@ -348,7 +333,7 @@ function detectBlow(dt) {
     if (f >= 300 && f <= 4000) { logSum += Math.log(pw + 1e-20); linSum += pw; n++; }
   }
   const flat = n ? Math.exp(logSum / n) / (linSum / n + 1e-20) : 0, lowRatio = low / total;
-  const thr = Math.max(0.012, floor * 4);
+  const thr = Math.max(0.008, floor * 3.5);
   const loud = rms > thr, breathy = flat > 0.03 || lowRatio > 0.5;   // only clearly tonal sound (a voice) is rejected
   if (!loud) floor = floor * 0.97 + rms * 0.03;        // learn the room's background noise
   lastAudio = { rms: +rms.toFixed(4), thr: +thr.toFixed(4), flat: +flat.toFixed(3), lowRatio: +lowRatio.toFixed(3) };
